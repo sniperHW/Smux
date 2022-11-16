@@ -99,7 +99,6 @@ public class Session
             nextStreamID = 0;
         }
 
-        #pragma warning disable CS4014
         Task.Run(shaperLoop);
         Task.Run(recvLoop);
         Task.Run(sendLoop);
@@ -107,7 +106,6 @@ public class Session
             Task.Run(keepalive);
             Task.Run(ping);
         }
-        #pragma warning restore CS4014
     }
 
     internal void returnTokens(int n)
@@ -166,7 +164,7 @@ public class Session
     }
 
     private async Task readfullAsync(byte[] b)
-    {
+    {   
         if(b.Length > readBuffer.buff.Length)
         {
             throw new SmuxException("ErrMaxReceiveBuffer");
@@ -416,10 +414,15 @@ public class Session
         return stream;
     }
 
+    public async Task<Stream> AcceptStreamAsync(CancellationToken token)
+    {
+        var tokens = new CancellationToken[2]{token,die.Token};
+        return await acceptCh.ReceiveAsync(CancellationTokenSource.CreateLinkedTokenSource(tokens).Token);
+    }
+
     public async Task<Stream> AcceptStreamAsync()
     {
-        var stream = await acceptCh.ReceiveAsync(die.Token);
-        return stream;
+        return await acceptCh.ReceiveAsync(die.Token);
     }
 
     static public Session Server(NetworkStream s,Config config)
