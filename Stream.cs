@@ -85,14 +85,14 @@ public class Stream
         this.sess = sess;
     }
 
-    private async Task waitRead()
+    private Task waitRead()
     {
         var source = fin;
         if(ReadTimeout > 0) {
             source = CancellationTokenSource.CreateLinkedTokenSource(fin.Token);
             source.CancelAfter((int)ReadTimeout);   
         }
-        await chReadEvent.ReceiveAsync(source.Token);
+        return chReadEvent.ReceiveAsync(source.Token);
     }
 
     public async Task<int> ReadAsync(byte[] b)
@@ -206,11 +206,11 @@ public class Stream
         return n;
     }
 
-    private async Task sendWindowUpdate(uint consumed)
+    private Task sendWindowUpdate(uint consumed)
     {
         var hdr = new UpdHeader(consumed,(uint)sess.Config.MaxStreamBuffer);
         var frame = new Frame((byte)sess.Config.Version,Frame.cmdUPD,Id,hdr.H,0,hdr.H.Length);
-        await sess.WriteFrameInternal(frame,0,ReadTimeout);
+        return sess.WriteFrameInternal(frame,0,ReadTimeout);
     }
 
     public async Task<int> WriteAsync(byte[] b) 
