@@ -47,7 +47,19 @@ public class Session
 
     }
 
+    private class ReadBuffer
+    {
+        public byte[] buff;
+        public int w;
+        public int r;
 
+        public ReadBuffer(int MaxReceiveBuffer)
+        {
+            buff = new byte[MaxReceiveBuffer];
+        }
+    }
+
+    private ReadBuffer readBuffer;
     private NetworkStream netstream;
     private bool netstreamClosed = false;
     public Config Config{get;}
@@ -78,6 +90,7 @@ public class Session
         Config = config;
         bucket = config.MaxReceiveBuffer;
         netstream = s;
+        readBuffer = new ReadBuffer(config.MaxFrameSize+Frame.headerSize);
 
         if(client)
         {
@@ -133,7 +146,6 @@ public class Session
         streamLock.ReleaseMutex();
     }
 
-
     public async Task<int> WriteFrame(Frame f)
     {
         return await WriteFrameInternal(f,0,null);
@@ -155,7 +167,39 @@ public class Session
 
     private async Task readfullAsync(byte[] b)
     {
+        if(b.Length > readBuffer.buff.Length)
+        {
+            throw new SmuxException("ErrMaxReceiveBuffer");
+        }
+
         var offset = 0;
+        for(;offset < b.Length;)
+        {
+            var avalabile = readBuffer.w - readBuffer.r;
+            var copy = b.Length - offset;
+            if(copy > avalabile)
+            {
+                copy = avalabile;
+            }
+            Array.Copy(readBuffer.buff,readBuffer.r,b,offset,copy);
+            readBuffer.r += copy;
+            offset += copy;
+            if(readBuffer.r == readBuffer.w) 
+            {
+                readBuffer.r = readBuffer.w = 0;
+            }
+            if(offset < b.Length)
+            {
+                var space = readBuffer.buff.Length - readBuffer.w;
+                var n = await netstream.ReadAsync(readBuffer.buff,readBuffer.w,space,die.Token);
+                if(n <= 0) {
+                    throw new SmuxException("ErrClosedPipe");
+                }
+                readBuffer.w += n;
+            }
+        }
+        /*var offset = 0;
+
         for(;offset < b.Length;)
         {
             var n = await netstream.ReadAsync(b,offset,b.Length-offset,die.Token);
@@ -163,7 +207,7 @@ public class Session
                 throw new SmuxException("ErrClosedPipe");
             }
             offset += n;
-        }
+        }*/
     }
 
     public async void recvLoop()

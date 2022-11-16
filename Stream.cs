@@ -210,7 +210,7 @@ public class Stream
     public async Task sendWindowUpdate(uint consumed)
     {
         var hdr = new UpdHeader(consumed,(uint)sess.Config.MaxStreamBuffer);
-        var frame = new Frame((byte)sess.Config.Version,Frame.cmdUPD,Id,hdr.H);
+        var frame = new Frame((byte)sess.Config.Version,Frame.cmdUPD,Id,hdr.H,0,hdr.H.Length);
         await sess.WriteFrameInternal(frame,0,ReadTimeout);
     }
 
@@ -228,15 +228,13 @@ public class Stream
             }
 
             var sent = 0;
-            var frame = new Frame((byte)sess.Config.Version,Frame.cmdPSH,Id,b);
             for(;sent < b.Length;)
             {
                 var sz = b.Length-sent;
                 if(sz > frameSize) {
                     sz = frameSize;
                 }
-                frame.Offset = sent;
-                frame.Length = sz;              
+                var frame = new Frame((byte)sess.Config.Version,Frame.cmdPSH,Id,b,sent,sz);          
                 var n = await sess.WriteFrameInternal(frame,numWritten,WriteTimeout);
                 sent += n;
             }
@@ -264,8 +262,6 @@ public class Stream
         }
 
         var sent = 0;
-        var frame = new Frame((byte)sess.Config.Version,Frame.cmdPSH,Id,b);
-
         for(;sent < b.Length;)
         {
             var inflight = numWritten - peerConsumed;
@@ -291,8 +287,7 @@ public class Stream
                     if(sz > frameSize) {
                         sz = frameSize;
                     }
-                    frame.Offset = sent;
-                    frame.Length = sz;
+                    var frame = new Frame((byte)sess.Config.Version,Frame.cmdPSH,Id,b,sent,sz);
                     var n = await sess.WriteFrameInternal(frame,numWritten,WriteTimeout);
                     sent += n;
                     avalabile -= n;

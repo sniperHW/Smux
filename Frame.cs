@@ -32,9 +32,9 @@ public class Frame
     public byte Cmd{get;}
     public uint Sid{get;}
     public byte[]? Data{get;}
-    public int Length{get;set;}
+    public int Length{get;}
 
-    public int Offset{get;set;}
+    public int Offset{get;}
 
     public Frame(byte version,byte cmd,uint sid){
         Ver = version;
@@ -43,12 +43,13 @@ public class Frame
     }
 
 
-    public Frame(byte version,byte cmd,uint sid,byte []data){
+    public Frame(byte version,byte cmd,uint sid,byte []data,int offset,int length){
         Ver = version;
         Cmd = cmd;
         Sid = sid;
         Data = data;
-        Length = data.Length;
+        Offset = offset;
+        Length = length;
     }
 
 
