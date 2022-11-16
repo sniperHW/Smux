@@ -11,47 +11,6 @@ namespace Smux;
 
 public class Session
 {
-    private SessionInternal s;
-
-    internal Session(SessionInternal s)
-    {
-        this.s = s;
-    }
-
-    public void Close()
-    {
-        s.Close();
-    }
-
-    public async Task<Stream> OpenStreamAsync()
-    {
-        var stream = await s.OpenStreamAsync();
-        return new Stream(stream);
-    }
-
-    public async Task<Stream> AcceptStreamAsync()
-    {
-        var stream = await s.AcceptStreamAsync();
-        return new Stream(stream);
-    }
-
-    static public Session Server(NetworkStream s,Config config)
-    {
-        config.Verify();
-        var session = new SessionInternal(config,s,false);
-        return new Session(session);
-    }
-
-    static public Session Client(NetworkStream s,Config config)
-    {
-        config.Verify();
-        var session = new SessionInternal(config,s,true);
-        return new Session(session);
-    }     
-}
-
-internal class SessionInternal
-{
     private class writeRequest : IComparable 
     {
         public uint prio;
@@ -103,7 +62,7 @@ internal class SessionInternal
     private ReadBuffer readBuffer;
     private NetworkStream netstream;
     private bool netstreamClosed = false;
-    public Config Config{get;}
+    internal Config Config{get;}
     private uint nextStreamID;
     private Mutex nextStreamIDLock = new Mutex();
     private int bucket;
@@ -111,7 +70,7 @@ internal class SessionInternal
     {
         BoundedCapacity = 1
     });
-    private Dictionary<uint,StreamInternal> streams = new Dictionary<uint,StreamInternal>();
+    private Dictionary<uint,Stream> streams = new Dictionary<uint,Stream>();
     private Mutex streamLock = new Mutex();
     private CancellationTokenSource die = new CancellationTokenSource();
     private int dieOnce = 0;
@@ -122,11 +81,11 @@ internal class SessionInternal
 
     private BufferBlock<writeRequest> writes = new BufferBlock<writeRequest>();
 
-    private BufferBlock<StreamInternal> acceptCh = new BufferBlock<StreamInternal>();
+    private BufferBlock<Stream> acceptCh = new BufferBlock<Stream>();
 
     private int dataReady = 0;
 
-    public SessionInternal(Config config,NetworkStream s,bool client)
+    internal Session(Config config,NetworkStream s,bool client)
     {
         Config = config;
         bucket = config.MaxReceiveBuffer;
@@ -151,7 +110,7 @@ internal class SessionInternal
         #pragma warning restore CS4014
     }
 
-    public void returnTokens(int n)
+    internal void returnTokens(int n)
     {
         if(Interlocked.Add(ref bucket,n) > 0)
         {
@@ -164,7 +123,7 @@ internal class SessionInternal
         if(Interlocked.CompareExchange(ref dieOnce,1,0) == 0)
         {
             streamLock.WaitOne();
-            foreach( KeyValuePair<uint,StreamInternal> kvp in streams ){
+            foreach( KeyValuePair<uint,Stream> kvp in streams ){
                 kvp.Value.SessionClose();
             }
             streamLock.ReleaseMutex();
@@ -173,7 +132,7 @@ internal class SessionInternal
         }
     }
 
-    public void StreamClose(uint sid)
+    internal void StreamClose(uint sid)
     {
         streamLock.WaitOne();
         if(streams.ContainsKey(sid)){
@@ -187,12 +146,12 @@ internal class SessionInternal
         streamLock.ReleaseMutex();
     }
 
-    public async Task<int> WriteFrame(Frame f)
+    internal async Task<int> WriteFrame(Frame f)
     {
         return await WriteFrameInternal(f,0,null);
     }
 
-    public async Task<int> WriteFrameInternal(Frame f,uint prio,int? timeout)
+    internal async Task<int> WriteFrameInternal(Frame f,uint prio,int? timeout)
     {
         var req = new writeRequest(prio,f);
         await shaper.SendAsync(req);
@@ -239,19 +198,9 @@ internal class SessionInternal
                 readBuffer.w += n;
             }
         }
-        /*var offset = 0;
-
-        for(;offset < b.Length;)
-        {
-            var n = await netstream.ReadAsync(b,offset,b.Length-offset,die.Token);
-            if(n <= 0) {
-                throw new SmuxException("ErrClosedPipe");
-            }
-            offset += n;
-        }*/
     }
 
-    public async void recvLoop()
+    private async void recvLoop()
     {
         try{
             var hdr = new RawHeader();
@@ -276,7 +225,7 @@ internal class SessionInternal
                     case Frame.cmdSYN:
                         streamLock.WaitOne();
                         if(!streams.ContainsKey(sid)) {
-                            var stream = new StreamInternal(sid,Config.MaxFrameSize,this);
+                            var stream = new Stream(sid,Config.MaxFrameSize,this);
                             streams[sid] = stream;
                             acceptCh.Post(stream);        
                         }
@@ -434,7 +383,7 @@ internal class SessionInternal
         }
     }
 
-    public async Task<StreamInternal> OpenStreamAsync()
+    public async Task<Stream> OpenStreamAsync()
     {
         if(netstreamClosed)
         {
@@ -457,7 +406,7 @@ internal class SessionInternal
         }
         nextStreamIDLock.ReleaseMutex();
 
-        var stream = new StreamInternal(sid,Config.MaxFrameSize,this);
+        var stream = new Stream(sid,Config.MaxFrameSize,this);
 
         await WriteFrame(new Frame((byte)Config.Version,Frame.cmdSYN,sid));
 
@@ -467,9 +416,21 @@ internal class SessionInternal
         return stream;
     }
 
-    public async Task<StreamInternal> AcceptStreamAsync()
+    public async Task<Stream> AcceptStreamAsync()
     {
         var stream = await acceptCh.ReceiveAsync(die.Token);
         return stream;
+    }
+
+    static public Session Server(NetworkStream s,Config config)
+    {
+        config.Verify();
+        return new Session(config,s,false);
+    }
+
+    static public Session Client(NetworkStream s,Config config)
+    {
+        config.Verify();
+        return new Session(config,s,true);
     }
 }

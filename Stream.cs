@@ -10,37 +10,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 namespace Smux;
 
-
-public class Stream 
-{
-    private StreamInternal s;
-
-    public uint Id{get=>s.Id;}
-    public int? ReadTimeout{get=>s.ReadTimeout;set=>s.ReadTimeout=value;}
-    public int? WriteTimeout{get=>s.ReadTimeout;set=>s.WriteTimeout=value;} 
-
-    internal Stream(StreamInternal s)
-    {
-        this.s = s;
-    }
-
-    public Task<int> ReadAsync(byte[] b)
-    {
-        return s.ReadAsync(b);
-    }
-
-    public Task<int> WriteAsync(byte[] b)
-    {
-        return s.WriteAsync(b);
-    }
-
-    public Task Close()
-    {
-        return s.Close();
-    }
-}
-
-internal class StreamInternal
+public class Stream
 {
     private class buffer {
         public int Offset;
@@ -54,7 +24,7 @@ internal class StreamInternal
     }
 
     public uint Id{get;}
-    private SessionInternal sess;
+    private Session sess;
     private Mutex bufferLock = new Mutex();
 
     private List<buffer> buffers = new List<buffer>();
@@ -107,7 +77,7 @@ internal class StreamInternal
 
     private BufferBlock<byte> chUpdate = new BufferBlock<byte>();
 
-    public StreamInternal(uint id,int frameSize,SessionInternal sess)
+    internal Stream(uint id,int frameSize,Session sess)
     {
         fin = CancellationTokenSource.CreateLinkedTokenSource(die.Token);
         Id = id;
@@ -336,36 +306,36 @@ internal class StreamInternal
         return sent; 
     }
 
-    public void pushBytes(byte[] buf)
+    internal void pushBytes(byte[] buf)
     {
         bufferLock.WaitOne();
         buffers.Add(new buffer(buf,0));
         bufferLock.ReleaseMutex();
     }
 
-    public void Update(uint consumed,uint window)
+    internal void Update(uint consumed,uint window)
     {
         peerConsumed = consumed;
         peerWindow = window;
         chUpdate.Post((byte)0);
     }
 
-    public void Fin()
+    internal void Fin()
     {
         fin.Cancel();
     }
 
-    public void NotifyReadEvent()
+    internal void NotifyReadEvent()
     {
         chReadEvent.Post((byte)0);
     }
 
-    public void SessionClose()
+    internal void SessionClose()
     {
         die.Cancel();
     }
 
-    public int RecycleTokens()
+    internal int RecycleTokens()
     {
         var n = 0;
         bufferLock.WaitOne();
