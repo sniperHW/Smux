@@ -11,6 +11,47 @@ namespace Smux;
 
 public class Session
 {
+    private SessionInternal s;
+
+    internal Session(SessionInternal s)
+    {
+        this.s = s;
+    }
+
+    public void Close()
+    {
+        s.Close();
+    }
+
+    public async Task<Stream> OpenStreamAsync()
+    {
+        var stream = await s.OpenStreamAsync();
+        return new Stream(stream);
+    }
+
+    public async Task<Stream> AcceptStreamAsync()
+    {
+        var stream = await s.AcceptStreamAsync();
+        return new Stream(stream);
+    }
+
+    static public Session Server(NetworkStream s,Config config)
+    {
+        config.Verify();
+        var session = new SessionInternal(config,s,false);
+        return new Session(session);
+    }
+
+    static public Session Client(NetworkStream s,Config config)
+    {
+        config.Verify();
+        var session = new SessionInternal(config,s,true);
+        return new Session(session);
+    }     
+}
+
+internal class SessionInternal
+{
     private class writeRequest : IComparable 
     {
         public uint prio;
@@ -70,7 +111,7 @@ public class Session
     {
         BoundedCapacity = 1
     });
-    private Dictionary<uint,Stream> streams = new Dictionary<uint,Stream>();
+    private Dictionary<uint,StreamInternal> streams = new Dictionary<uint,StreamInternal>();
     private Mutex streamLock = new Mutex();
     private CancellationTokenSource die = new CancellationTokenSource();
     private int dieOnce = 0;
@@ -81,11 +122,11 @@ public class Session
 
     private BufferBlock<writeRequest> writes = new BufferBlock<writeRequest>();
 
-    private BufferBlock<Stream> acceptCh = new BufferBlock<Stream>();
+    private BufferBlock<StreamInternal> acceptCh = new BufferBlock<StreamInternal>();
 
     private int dataReady = 0;
 
-    public Session(Config config,NetworkStream s,bool client)
+    public SessionInternal(Config config,NetworkStream s,bool client)
     {
         Config = config;
         bucket = config.MaxReceiveBuffer;
@@ -123,7 +164,7 @@ public class Session
         if(Interlocked.CompareExchange(ref dieOnce,1,0) == 0)
         {
             streamLock.WaitOne();
-            foreach( KeyValuePair<uint,Stream> kvp in streams ){
+            foreach( KeyValuePair<uint,StreamInternal> kvp in streams ){
                 kvp.Value.SessionClose();
             }
             streamLock.ReleaseMutex();
@@ -235,7 +276,7 @@ public class Session
                     case Frame.cmdSYN:
                         streamLock.WaitOne();
                         if(!streams.ContainsKey(sid)) {
-                            var stream = new Stream(sid,Config.MaxFrameSize,this);
+                            var stream = new StreamInternal(sid,Config.MaxFrameSize,this);
                             streams[sid] = stream;
                             acceptCh.Post(stream);        
                         }
@@ -393,7 +434,7 @@ public class Session
         }
     }
 
-    public async Task<Stream> OpenStreamAsync()
+    public async Task<StreamInternal> OpenStreamAsync()
     {
         if(netstreamClosed)
         {
@@ -416,7 +457,7 @@ public class Session
         }
         nextStreamIDLock.ReleaseMutex();
 
-        var stream = new Stream(sid,Config.MaxFrameSize,this);
+        var stream = new StreamInternal(sid,Config.MaxFrameSize,this);
 
         await WriteFrame(new Frame((byte)Config.Version,Frame.cmdSYN,sid));
 
@@ -426,23 +467,9 @@ public class Session
         return stream;
     }
 
-    public async Task<Stream> AcceptStreamAsync()
+    public async Task<StreamInternal> AcceptStreamAsync()
     {
         var stream = await acceptCh.ReceiveAsync(die.Token);
         return stream;
     }
-
-    static public Session Server(NetworkStream s,Config config)
-    {
-        config.Verify();
-        return new Session(config,s,false);
-    }
-
-
-    static public Session Client(NetworkStream s,Config config)
-    {
-        config.Verify();
-        return new Session(config,s,true);
-    }
-
 }

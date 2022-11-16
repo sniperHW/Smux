@@ -10,9 +10,38 @@ using System.Collections.Generic;
 using System.Text.Json;
 namespace Smux;
 
-public class Stream
-{
 
+public class Stream 
+{
+    private StreamInternal s;
+
+    public uint Id{get=>s.Id;}
+    public int? ReadTimeout{get=>s.ReadTimeout;set=>s.ReadTimeout=value;}
+    public int? WriteTimeout{get=>s.ReadTimeout;set=>s.WriteTimeout=value;} 
+
+    internal Stream(StreamInternal s)
+    {
+        this.s = s;
+    }
+
+    public Task<int> ReadAsync(byte[] b)
+    {
+        return s.ReadAsync(b);
+    }
+
+    public Task<int> WriteAsync(byte[] b)
+    {
+        return s.WriteAsync(b);
+    }
+
+    public Task Close()
+    {
+        return s.Close();
+    }
+}
+
+internal class StreamInternal
+{
     private class buffer {
         public int Offset;
         public byte[] Bytes;
@@ -25,7 +54,7 @@ public class Stream
     }
 
     public uint Id{get;}
-    private Session sess;
+    private SessionInternal sess;
     private Mutex bufferLock = new Mutex();
 
     private List<buffer> buffers = new List<buffer>();
@@ -78,7 +107,7 @@ public class Stream
 
     private BufferBlock<byte> chUpdate = new BufferBlock<byte>();
 
-    public Stream(uint id,int frameSize,Session sess)
+    public StreamInternal(uint id,int frameSize,SessionInternal sess)
     {
         fin = CancellationTokenSource.CreateLinkedTokenSource(die.Token);
         Id = id;
@@ -207,7 +236,7 @@ public class Stream
         return n;
     }
 
-    public async Task sendWindowUpdate(uint consumed)
+    private async Task sendWindowUpdate(uint consumed)
     {
         var hdr = new UpdHeader(consumed,(uint)sess.Config.MaxStreamBuffer);
         var frame = new Frame((byte)sess.Config.Version,Frame.cmdUPD,Id,hdr.H,0,hdr.H.Length);

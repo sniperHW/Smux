@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 namespace Smux;
 
 
@@ -66,7 +68,4 @@ public class Config
             throw new SmuxException("max stream buffer cannot be larger than 2147483647");
         }               
     }
-
-    
-
 }
