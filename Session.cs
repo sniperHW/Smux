@@ -292,7 +292,8 @@ public class Session
                 {
                     bucketNotify.Post((byte)0);
                 }
-            }catch(Exception)
+            }
+            catch(Exception)
             {
                 break;
             }
@@ -325,7 +326,8 @@ public class Session
 
     private async void sendLoop()
     {
-        try{
+        try
+        {
             using MemoryStream memoryStream = new MemoryStream();
             for(;;){
                 var req = await writes.ReceiveAsync(die.Token);
@@ -345,9 +347,10 @@ public class Session
                 memoryStream.Position = 0;
                 memoryStream.SetLength(0);
             }
-        }catch(Exception e){
+        }
+        catch(Exception e)
+        {
             Console.WriteLine(e);
-            return;
         }
     }
 
@@ -375,9 +378,9 @@ public class Session
                 }
             }
         }
-        catch(Exception)
+        catch(Exception e)
         {
-            return;
+            Console.WriteLine(e);
         }
     }
 

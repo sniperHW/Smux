@@ -112,21 +112,21 @@ public class Stream
                 if(die.IsCancellationRequested)
                 {
                     throw new SmuxException("ErrClosedPipe");
-                }
-
-                if(fin.IsCancellationRequested)
+                } 
+                else if(fin.IsCancellationRequested)
                 {
                     bufferLock.WaitOne();
-                    if(buffers.Count > 0)
+                    var count = buffers.Count;
+                    bufferLock.ReleaseMutex();
+                    if(count == 0)
                     {
-                        bufferLock.ReleaseMutex();
-                    } else {
-                        bufferLock.ReleaseMutex();
                         throw new SmuxException("ErrEof");
                     }
                 }
-
-                throw new SmuxException("ErrReadTimeout");
+                else 
+                {
+                    throw new SmuxException("ErrReadTimeout");
+                }
             }
         }
     }
@@ -245,11 +245,13 @@ public class Stream
             {
                 throw new SmuxException("ErrClosedPipe");
             }
-            if(fin.IsCancellationRequested)
+            else if(fin.IsCancellationRequested)
             {
                 throw new SmuxException("ErrEof");
             }
-            throw new SmuxException("ErrWriteTimeout");
+            else {
+                throw new SmuxException("ErrWriteTimeout");
+            }
         }
     }
  
