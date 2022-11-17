@@ -5,16 +5,15 @@ namespace Smux;
 
 public class SmuxException : Exception
 {
-    private string msg;
-
+    public string Msg{get;}
     public SmuxException(string msg)
     {
-        this.msg = msg;
+        Msg = msg;
     }
 
     override public string ToString()
     {
-        return this.msg;
+        return $"SmuxException:{Msg}";
     }
 }
 
