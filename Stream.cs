@@ -25,7 +25,7 @@ public class Stream
 
     public uint Id{get;}
     private Session sess;
-    private Mutex bufferLock = new Mutex();
+    private readonly object bufferLock = new object();
 
     private List<buffer> buffers = new List<buffer>();
 
@@ -115,12 +115,11 @@ public class Stream
                 } 
                 else if(fin.IsCancellationRequested)
                 {
-                    bufferLock.WaitOne();
-                    var count = buffers.Count;
-                    bufferLock.ReleaseMutex();
-                    if(count == 0)
+                    lock(bufferLock)
                     {
-                        throw new SmuxException("ErrEof");
+                        if(buffers.Count == 0) {
+                            throw new SmuxException("ErrEof");
+                        } 
                     }
                 }
                 else 
@@ -140,22 +139,23 @@ public class Stream
 
         int  n = 0;
 
-        bufferLock.WaitOne();
-        if(buffers.Count > 0)
+        lock(bufferLock)
         {
-            var buff = buffers[0];
-            n = b.Length;
-            if(buff.Bytes.Length - buff.Offset < n) 
+            if(buffers.Count > 0)
             {
-                n = buff.Bytes.Length - buff.Offset;
-            }
-            Array.Copy(buff.Bytes,buff.Offset,b,0,n);
-            buff.Offset += n;
-            if(buff.Offset >= buff.Bytes.Length){
-                buffers.RemoveAt(0);
+                var buff = buffers[0];
+                n = b.Length;
+                if(buff.Bytes.Length - buff.Offset < n) 
+                {
+                    n = buff.Bytes.Length - buff.Offset;
+                }
+                Array.Copy(buff.Bytes,buff.Offset,b,0,n);
+                buff.Offset += n;
+                if(buff.Offset >= buff.Bytes.Length){
+                    buffers.RemoveAt(0);
+                }
             }
         }
-        bufferLock.ReleaseMutex();
 
         if(n > 0) {
             sess.returnTokens(n);
@@ -173,29 +173,30 @@ public class Stream
         uint notifyConsumed = 0;
         int  n = 0;
 
-        bufferLock.WaitOne();
-        if(buffers.Count > 0)
+        lock(bufferLock)
         {
-            var buff = buffers[0];
-            n = b.Length;
-            if(buff.Bytes.Length - buff.Offset < n) 
+            if(buffers.Count > 0)
             {
-                n = buff.Bytes.Length - buff.Offset;
-            }
-            Array.Copy(buff.Bytes,buff.Offset,b,0,n);
-            buff.Offset += n;
-            if(buff.Offset >= buff.Bytes.Length){
-                buffers.RemoveAt(0);
+                var buff = buffers[0];
+                n = b.Length;
+                if(buff.Bytes.Length - buff.Offset < n) 
+                {
+                    n = buff.Bytes.Length - buff.Offset;
+                }
+                Array.Copy(buff.Bytes,buff.Offset,b,0,n);
+                buff.Offset += n;
+                if(buff.Offset >= buff.Bytes.Length){
+                    buffers.RemoveAt(0);
 
+                }
+            }
+            numRead += (uint)n;
+            incr += (uint)n;
+            if(incr >= (uint)(sess.Config.MaxStreamBuffer/2) || numRead == (uint)n) {
+                notifyConsumed = numRead;
+                incr = 0;
             }
         }
-        numRead += (uint)n;
-        incr += (uint)n;
-        if(incr >= (uint)(sess.Config.MaxStreamBuffer/2) || numRead == (uint)n) {
-            notifyConsumed = numRead;
-            incr = 0;
-        }
-        bufferLock.ReleaseMutex();
 
         if(n > 0) {
             sess.returnTokens(n);
@@ -310,9 +311,10 @@ public class Stream
 
     internal void pushBytes(byte[] buf)
     {
-        bufferLock.WaitOne();
-        buffers.Add(new buffer(buf,0));
-        bufferLock.ReleaseMutex();
+        lock(bufferLock)
+        {
+            buffers.Add(new buffer(buf,0));
+        }
     }
 
     internal void Update(uint consumed,uint window)
@@ -340,13 +342,14 @@ public class Stream
     internal int RecycleTokens()
     {
         var n = 0;
-        bufferLock.WaitOne();
-        for(;buffers.Count>0;){
-            var buff = buffers[0];
-            n += (int)(buff.Bytes.Length - buff.Offset);
-            buffers.RemoveAt(0);
+        lock(bufferLock)
+        {
+            for(;buffers.Count>0;){
+                var buff = buffers[0];
+                n += (int)(buff.Bytes.Length - buff.Offset);
+                buffers.RemoveAt(0);
+            }
         }
-        bufferLock.ReleaseMutex();
         return n;
     }
 

@@ -64,14 +64,15 @@ public class Session
     private bool netstreamClosed = false;
     internal Config Config{get;}
     private uint nextStreamID;
-    private Mutex nextStreamIDLock = new Mutex();
+    private readonly object nextStreamIDLock = new object();
     private int bucket;
     private BufferBlock<byte> bucketNotify = new BufferBlock<byte>(new DataflowBlockOptions()
     {
         BoundedCapacity = 1
     });
     private Dictionary<uint,Stream> streams = new Dictionary<uint,Stream>();
-    private Mutex streamLock = new Mutex();
+    private readonly object streamLock = new object();
+    
     private CancellationTokenSource die = new CancellationTokenSource();
     private int dieOnce = 0;
 
@@ -120,11 +121,12 @@ public class Session
     {
         if(Interlocked.CompareExchange(ref dieOnce,1,0) == 0)
         {
-            streamLock.WaitOne();
-            foreach( KeyValuePair<uint,Stream> kvp in streams ){
-                kvp.Value.SessionClose();
+            lock(streamLock)
+            {
+                foreach( KeyValuePair<uint,Stream> kvp in streams ){
+                    kvp.Value.SessionClose();
+                }
             }
-            streamLock.ReleaseMutex();
             netstream.Socket.Close();
             die.Cancel();
         }
@@ -132,16 +134,17 @@ public class Session
 
     internal void StreamClose(uint sid)
     {
-        streamLock.WaitOne();
-        if(streams.ContainsKey(sid)){
-            var stream = streams[sid];
-            var n = stream.RecycleTokens();
-            if(n > 0 && Interlocked.Add(ref bucket,n) > 0)
-            {
-                bucketNotify.Post((byte)0);
+        lock(streamLock)
+        {
+            if(streams.ContainsKey(sid)){
+                var stream = streams[sid];
+                var n = stream.RecycleTokens();
+                if(n > 0 && Interlocked.Add(ref bucket,n) > 0)
+                {
+                    bucketNotify.Post((byte)0);
+                }
             }
         }
-        streamLock.ReleaseMutex();
     }
 
     internal async Task<int> WriteFrame(Frame f)
@@ -221,45 +224,49 @@ public class Session
                     case Frame.cmdNOP:
                     break;
                     case Frame.cmdSYN:
-                        streamLock.WaitOne();
-                        if(!streams.ContainsKey(sid)) {
-                            var stream = new Stream(sid,Config.MaxFrameSize,this);
-                            streams[sid] = stream;
-                            acceptCh.Post(stream);        
+                        lock(streamLock)
+                        {
+                            if(!streams.ContainsKey(sid)) {
+                                var stream = new Stream(sid,Config.MaxFrameSize,this);
+                                streams[sid] = stream;
+                                acceptCh.Post(stream);        
+                            }
                         }
-                        streamLock.ReleaseMutex();
                         break;
                     case Frame.cmdFIN:
-                        streamLock.WaitOne();
-                        if(streams.ContainsKey(sid)) {
-                            var stream = streams[sid];
-                            stream.Fin();
-                            stream.NotifyReadEvent();       
-                        }
-                        streamLock.ReleaseMutex();                    
+                        lock(streamLock)
+                        {
+                            if(streams.ContainsKey(sid)) {
+                                var stream = streams[sid];
+                                stream.Fin();
+                                stream.NotifyReadEvent();       
+                            }
+                        }                  
                         break;
                     case Frame.cmdPSH:
                         if(hdr.Length() > 0){
                             var buff = new byte[hdr.Length()];
                             await readfullAsync(buff);
-                            streamLock.WaitOne();
-                            if(streams.ContainsKey(sid)) {  
-                                var stream = streams[sid];
-                                stream.pushBytes(buff);
-                                stream.NotifyReadEvent(); 
-                                Interlocked.Add(ref bucket,-buff.Length);     
+                            lock(streamLock)
+                            {
+                                if(streams.ContainsKey(sid)) {  
+                                    var stream = streams[sid];
+                                    stream.pushBytes(buff);
+                                    stream.NotifyReadEvent(); 
+                                    Interlocked.Add(ref bucket,-buff.Length);     
+                                }
                             }
-                            streamLock.ReleaseMutex(); 
                         }
                         break;
                     case Frame.cmdUPD:
                         await readfullAsync(updHdr.H);
-                        streamLock.WaitOne();
-                        if(streams.ContainsKey(sid)) {  
-                            var stream = streams[sid];
-                            stream.Update(updHdr.Consumed,updHdr.Window);    
-                        }
-                        streamLock.ReleaseMutex(); 
+                        lock(streamLock)
+                        {
+                            if(streams.ContainsKey(sid)) {  
+                                var stream = streams[sid];
+                                stream.Update(updHdr.Consumed,updHdr.Window);    
+                            }
+                        } 
                         break;
                     default:
                         throw new SmuxException("ErrInvalidProtocol");
@@ -391,29 +398,31 @@ public class Session
             throw new SmuxException("ErrClosedPipe");
         }
 
-        nextStreamIDLock.WaitOne();
-        if(goAway > 0) 
-        {
-            nextStreamIDLock.ReleaseMutex();
-            throw new SmuxException("ErrGoAway");
-        }
+        uint sid = 0;
 
-        nextStreamID += 2;
-        var sid = nextStreamID;
-        if(sid == sid % 2) {
-            goAway = 1;
-            nextStreamIDLock.ReleaseMutex();
-            throw new SmuxException("ErrGoAway");            
+        lock(nextStreamIDLock)
+        {
+            if(goAway > 0) 
+            {
+                throw new SmuxException("ErrGoAway");
+            }
+
+            nextStreamID += 2;
+            sid = nextStreamID;
+            if(sid == sid % 2) {
+                goAway = 1;
+                throw new SmuxException("ErrGoAway");            
+            }
         }
-        nextStreamIDLock.ReleaseMutex();
 
         var stream = new Stream(sid,Config.MaxFrameSize,this);
 
         await WriteFrame(new Frame((byte)Config.Version,Frame.cmdSYN,sid));
 
-        streamLock.WaitOne();
-        streams[sid] = stream;
-        streamLock.ReleaseMutex();
+        lock(streamLock)
+        {
+            streams[sid] = stream;
+        }
         return stream;
     }
 
